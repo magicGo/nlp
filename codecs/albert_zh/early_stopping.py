@@ -394,14 +394,13 @@ def _stop_if_no_metric_improvement_hook(
             if step < min_steps:
                 continue
             current_step = step
-            # if metric_name == 'eval_f1_score':
-            #     eval_precision = metrics['eval_precision']
-            #     eval_recall = metrics['eval_recall']
-            #     eval_f1_score = (2 * eval_precision * eval_recall) / (eval_precision + eval_recall + 1e-7)
-            #     val = eval_f1_score
-            # else:
-            #     val = metrics[metric_name]
-            val = metrics[metric_name]
+            if metric_name == 'classifier_eval_accuracy_and_ner_eval_f1_score':
+                classifier_eval_accuracy = metrics['classifier_eval_accuracy']
+                ner_eval_f1_score = metrics['ner_eval_f1_score']
+                val = classifier_eval_accuracy * 0.5 + ner_eval_f1_score * 0.5
+            else:
+                val = metrics[metric_name]
+            # val = metrics[metric_name]
             if best_val is None or is_lhs_better(val, best_val):
                 best_val = val
                 best_val_step = step
