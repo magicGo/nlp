@@ -25,7 +25,7 @@ import logging
 import math
 import os
 from random import shuffle
-
+import numpy as np
 import modeling
 import optimization_finetuning as optimization
 import tf_metrics
@@ -42,7 +42,7 @@ FLAGS = flags.FLAGS
 
 ## Required parameters
 flags.DEFINE_string(
-    "data_dir", 'data/joint_classifier_ner/BathRoomMaster',
+    "data_dir", 'data/joint_classifier_ner/Heater',
     "The input data dir. Should contain the .tsv files (or other data files) "
     "for the task.")
 
@@ -57,7 +57,7 @@ flags.DEFINE_string("vocab_file", 'models/albert_tiny/vocab.txt',
                     "The vocabulary file that the BERT model was trained on.")
 
 flags.DEFINE_string(
-    "output_dir", 'output/joint_classifier_ner/BathRoomMaster',
+    "output_dir", 'output/joint_classifier_ner/Heater',
     "The output directory where the model checkpoints will be written.")
 
 ## Other parameters
@@ -345,7 +345,6 @@ def convert_single_example(ex_index, example, label_map, tag_map, max_seq_length
 
     textlist = example.text_a.split()
     taglist = example.tag.split()
-    label = example.label
 
     tokens = []
     tags = []
@@ -707,7 +706,7 @@ def model_fn_builder(bert_config, num_labels, num_tags, init_checkpoint, learnin
         else:
             output_spec = tf.estimator.EstimatorSpec(
                 mode=mode,
-                predictions={"predictions": ner_predicts})
+                predictions={"predictions": ner_predicts, "probabilities": classifier_probabilities})
         return output_spec
 
     return model_fn
@@ -791,8 +790,9 @@ def main(_):
     tf.logging.set_verbosity(tf.logging.INFO)
     nowTime = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
     handlers = [
-        logging.FileHandler(os.path.join(FLAGS.output_dir, nowTime + '.log'), encoding='utf-8')
-                ]
+        logging.FileHandler(os.path.join(FLAGS.output_dir, nowTime + '.log'), encoding='utf-8'),
+        logging.StreamHandler()
+    ]
     logging.getLogger('tensorflow').handlers = handlers
 
     processors = {
@@ -986,27 +986,39 @@ def main(_):
 
         result = estimator.predict(input_fn=predict_input_fn, checkpoint_path=latest_checkpoint)
 
-        trie_file = os.path.join(FLAGS.output_dir, "trie.json")
-        regexes = []
-        with tf.gfile.GFile(trie_file, "w") as fp:
+        classifier_trie_file = os.path.join(FLAGS.output_dir, "classifier_trie.json")
+        ner_trie_file = os.path.join(FLAGS.output_dir, "ner_trie.json")
+        classifier_regexes = []
+        ner_regexes = []
+        with tf.gfile.GFile(classifier_trie_file, "w") as fc, tf.gfile.GFile(ner_trie_file, "w") as fn:
             num_written_lines = 0
             tf.logging.info("***** Predict results *****")
             for (i, prediction) in enumerate(result):
                 predictions = prediction["predictions"]
+                probabilities = prediction["probabilities"]
                 text = predict_examples[i].text_a
                 t_label = predict_examples[i].label
-                p_label = ' '.join([processor.get_inv_label_map()[str(predict)] for predict in predictions][1: len(text.split()) + 1])
+                t_tag = predict_examples[i].tag
+                p_label = processor.get_inv_label_map()[str(np.argmax(probabilities))]
+                p_score = np.max(probabilities)
+                p_tag = ' '.join([processor.get_inv_tag_map()[str(predict)] for predict in predictions][1: len(text.split()) + 1])
                 if i >= num_actual_predict_examples:
                     break
                 if t_label != p_label:
-                    print(t_label)
-                    print(p_label)
                     regex = dict()
                     regex['text'] = ''.join(tokenizer.tokenize(text))
                     regex['value'] = t_label
-                    regexes.append(regex)
+                    classifier_regexes.append(regex)
+                if t_tag != p_tag:
+                    print(t_tag)
+                    print(p_tag)
+                    regex = dict()
+                    regex['text'] = ''.join(tokenizer.tokenize(text))
+                    regex['value'] = t_tag
+                    ner_regexes.append(regex)
                 num_written_lines += 1
-            fp.write(json.dumps(regexes, ensure_ascii=False, indent=4))
+            fc.write(json.dumps(classifier_regexes, ensure_ascii=False, indent=4))
+            fn.write(json.dumps(ner_regexes, ensure_ascii=False, indent=4))
             # fp.write(yaml.dump_all(regexes, indent=4, allow_unicode=True))
         assert num_written_lines == num_actual_predict_examples
 
