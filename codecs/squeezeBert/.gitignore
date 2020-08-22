@@ -1,0 +1,6 @@
+__pycache__/
+data/
+.idea/
+classifier/
+output/
+run_pretraining
